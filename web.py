@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from datetime import datetime
 
 from flask import Flask, redirect, request, url_for
@@ -609,5 +610,6 @@ def whatsapp_delete():
 
 def start_web():
     """Start the Flask web server (meant to be called from a background thread)."""
-    logger.info("Starting web dashboard on 0.0.0.0:%d", WEB_PORT)
-    app.run(host="0.0.0.0", port=WEB_PORT, use_reloader=False)
+    port = int(os.environ.get("PORT", WEB_PORT))
+    logger.info("Starting web dashboard on 0.0.0.0:%d", port)
+    app.run(host="0.0.0.0", port=port, use_reloader=False)
