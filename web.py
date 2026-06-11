@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 from datetime import datetime
 
 from flask import Flask, redirect, request, url_for
@@ -22,11 +23,15 @@ from database import (
     get_price_thresholds,
     get_setting,
     get_whatsapp_contacts,
+    save_price_check,
     set_price_threshold,
     set_setting,
 )
+from scraper import scrape_all
 
 logger = logging.getLogger(__name__)
+
+_scrape_lock = threading.Lock()
 
 app = Flask(__name__)
 
@@ -90,6 +95,39 @@ def _days_until(date_str: str) -> int | None:
         return max(0, delta.days)
     except ValueError:
         return None
+
+
+# --- On-demand scraping ---
+
+
+def _scrape_if_stale():
+    """Scrape fresh data if the latest check is older than the scrape interval."""
+    if not _scrape_lock.acquire(blocking=False):
+        return  # another request is already scraping
+    try:
+        scrape_mins = int(get_setting("scrape_interval", str(SCRAPE_INTERVAL_MINUTES)))
+        latest = get_latest_prices()
+        if latest:
+            newest = max(row["check_time"] for row in latest)
+            age_secs = (datetime.utcnow() - datetime.strptime(newest, "%Y-%m-%d %H:%M:%S")).total_seconds()
+            if age_secs < scrape_mins * 60:
+                return  # data is fresh enough
+        logger.info("Data is stale — triggering on-demand scrape.")
+        results = scrape_all()
+        for data in results:
+            save_price_check(data)
+        logger.info("On-demand scrape complete — %d matches.", len(results))
+    except Exception as exc:
+        logger.error("On-demand scrape failed: %s", exc)
+    finally:
+        _scrape_lock.release()
+
+
+@app.before_request
+def _auto_scrape():
+    """Trigger a background scrape on page visit if data is stale."""
+    if request.endpoint in ("dashboard", None) and request.path == "/":
+        threading.Thread(target=_scrape_if_stale, daemon=True).start()
 
 
 # --- Dashboard ---

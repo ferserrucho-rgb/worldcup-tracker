@@ -1,9 +1,8 @@
 import logging
+import os
 import signal
 import sys
 import threading
-
-from apscheduler.schedulers.blocking import BlockingScheduler
 
 from config import NOTIFY_EMAIL, SCRAPE_INTERVAL_MINUTES
 from database import (
@@ -132,21 +131,26 @@ def main():
     logger.info("Initializing database ...")
     init_db()
 
-    scheduler = BlockingScheduler()
+    # On Render (or any platform without a scheduler), just run the web server.
+    # Scraping happens on-demand via web.py's before_request hook.
+    if os.environ.get("RENDER"):
+        logger.info("Running on Render — web-only mode (on-demand scraping).")
+        scrape_job()  # initial scrape
+        start_web()
+        return
 
-    # Make scheduler accessible to Flask for runtime rescheduling
+    # Local mode: run scheduler + web server in background thread
+    from apscheduler.schedulers.blocking import BlockingScheduler
+
+    scheduler = BlockingScheduler()
     app.config["scheduler"] = scheduler
 
-    # Start web dashboard in a background thread
     web_thread = threading.Thread(target=start_web, daemon=True)
     web_thread.start()
 
-    # Run first scrape immediately so there's data right away
     scrape_job()
 
-    # Read interval from DB, falling back to config.py default
     scrape_mins = int(get_setting("scrape_interval", str(SCRAPE_INTERVAL_MINUTES)))
-
     scheduler.add_job(scrape_job, "interval", minutes=scrape_mins, id="scrape")
 
     def shutdown(signum, frame):
