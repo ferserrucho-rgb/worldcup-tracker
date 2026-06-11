@@ -36,5 +36,8 @@ EMAIL_INTERVAL_MINUTES = 30
 # Web dashboard
 WEB_PORT = 8080
 
-# Database
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tickets.db")
+# Database — use persistent volume on Fly.io, local file otherwise
+if os.path.isdir("/data"):
+    DB_PATH = "/data/tickets.db"
+else:
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tickets.db")
